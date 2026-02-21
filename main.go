@@ -118,61 +118,76 @@ func classifyDirectory(dirPath string, hamBow, spamBow BagOfWords, hamTc, spamTc
 }
 
 func main() {
-	hamRoot := "./enron1/ham"
-	spamRoot := "./enron1/spam"
-
-	fmt.Println("Training on ham directory...")
-	err := filepath.WalkDir(hamRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() {
-			fileErr := addFileToBag(path, hamBagOfWords)
-			if fileErr != nil {
-				fmt.Fprintf(os.Stderr, "Error processing ham file %s: %v\n", path, fileErr)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		fmt.Printf("Error walking ham directory: %v\n", err)
-		return
+	trainingFolders := []string{
+		"./enron1",
+		"./enron2",
+		"./enron3",
+		"./enron4",
+		"./enron5",
 	}
+
+	fmt.Println("--- Starting Training ---")
+	for _, folder := range trainingFolders {
+		hamPath := filepath.Join(folder, "ham")
+		spamPath := filepath.Join(folder, "spam")
+
+		fmt.Printf("Processing ham in %s...\n", folder)
+		err := filepath.WalkDir(hamPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() {
+				fileErr := addFileToBag(path, hamBagOfWords)
+				if fileErr != nil {
+					fmt.Fprintf(os.Stderr, "Error processing ham file %s: %v\n", path, fileErr)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			fmt.Printf("Error walking ham directory %s: %v\n", hamPath, err)
+			return
+		}
+
+		fmt.Printf("Processing spam in %s...\n", folder)
+		err = filepath.WalkDir(spamPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() {
+				fileErr := addFileToBag(path, spamBagOfWords)
+				if fileErr != nil {
+					fmt.Fprintf(os.Stderr, "Error processing spam file %s: %v\n", path, fileErr)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			fmt.Printf("Error walking spam directory %s: %v\n", spamPath, err)
+			return
+		}
+	}
+
 	hamTotalCount = calculateTotalCount(hamBagOfWords)
-	fmt.Printf("Finished training ham. Unique words: %d, Total words: %d\n", len(hamBagOfWords), hamTotalCount)
-
-	fmt.Println("Training on spam directory...")
-	err = filepath.WalkDir(spamRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() {
-			fileErr := addFileToBag(path, spamBagOfWords)
-			if fileErr != nil {
-				fmt.Fprintf(os.Stderr, "Error processing spam file %s: %v\n", path, fileErr)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		fmt.Printf("Error walking spam directory: %v\n", err)
-		return
-	}
 	spamTotalCount = calculateTotalCount(spamBagOfWords)
-	fmt.Printf("Finished training spam. Unique words: %d, Total words: %d\n", len(spamBagOfWords), spamTotalCount)
-
+	fmt.Printf("Finished training. Total unique ham words: %d, Total ham words: %d\n", len(hamBagOfWords), hamTotalCount)
+	fmt.Printf("Finished training. Total unique spam words: %d, Total spam words: %d\n", len(spamBagOfWords), spamTotalCount)
 	fmt.Println("--- Training Complete ---")
 
-	fmt.Printf("\nClassifying HAM folder: %s\n", hamRoot)
-	hamPredictedSpam, hamPredictedHam, err := classifyDirectory(hamRoot, hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
+	// Test on enron6
+	validationHamDir := "./enron6/ham"
+	validationSpamDir := "./enron6/spam"
+
+	fmt.Printf("\nClassifying HAM folder (enron6): %s\n", validationHamDir)
+	hamPredictedSpam, hamPredictedHam, err := classifyDirectory(validationHamDir, hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
 	if err != nil {
 		fmt.Printf("Error classifying ham directory: %v\n", err)
 		return
 	}
 	fmt.Printf("  Actual HAM files: Predicted SPAM: %d, Predicted HAM: %d\n", hamPredictedSpam, hamPredictedHam)
 
-	fmt.Printf("\nClassifying SPAM folder: %s\n", spamRoot)
-	spamPredictedSpam, spamPredictedHam, err := classifyDirectory(spamRoot, hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
+	fmt.Printf("\nClassifying SPAM folder (enron6): %s\n", validationSpamDir)
+	spamPredictedSpam, spamPredictedHam, err := classifyDirectory(validationSpamDir, hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
 	if err != nil {
 		fmt.Printf("Error classifying spam directory: %v\n", err)
 		return
