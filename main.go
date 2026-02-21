@@ -119,11 +119,11 @@ func classifyDirectory(dirPath string, hamBow, spamBow BagOfWords, hamTc, spamTc
 
 func main() {
 	trainingFolders := []string{
-		"./enron1",
-		"./enron2",
-		"./enron3",
-		"./enron4",
-		"./enron5",
+		"./data/enron1",
+		"./data/enron2",
+		"./data/enron3",
+		"./data/enron4",
+		"./data/enron5",
 	}
 
 	fmt.Println("--- Starting Training ---")
@@ -175,8 +175,8 @@ func main() {
 	fmt.Println("--- Training Complete ---")
 
 	// Test on enron6
-	validationHamDir := "./enron6/ham"
-	validationSpamDir := "./enron6/spam"
+	validationHamDir := "./data/enron6/ham"
+	validationSpamDir := "./data/enron6/spam"
 
 	fmt.Printf("\nClassifying HAM folder (enron6): %s\n", validationHamDir)
 	hamPredictedSpam, hamPredictedHam, err := classifyDirectory(validationHamDir, hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
