@@ -9,11 +9,14 @@ import (
 	"strings"
 )
 
-var hamBagOfWords = make(map[string]int)
-var hamTotalCount int
+type BagOfWords map[string]int
 
-var spamBagOfWords = make(map[string]int)
-var spamTotalCount int
+var (
+	hamBagOfWords  BagOfWords = make(BagOfWords)
+	hamTotalCount  int
+	spamBagOfWords BagOfWords = make(BagOfWords)
+	spamTotalCount int
+)
 
 func tokenize(message string) []string {
 	fields := strings.Fields(message)
@@ -24,7 +27,7 @@ func tokenize(message string) []string {
 	return tokens
 }
 
-func addFileToBag(path string, bagOfWords map[string]int) error {
+func addFileToBag(path string, bagOfWords BagOfWords) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("could not read file %s: %w", path, err)
@@ -39,34 +42,59 @@ func addFileToBag(path string, bagOfWords map[string]int) error {
 	return nil
 }
 
-func calcLogDocProbability(docPath string, classBagOfWords map[string]int, classTotalCount int) (float64, error) {
-	content, err := os.ReadFile(docPath)
+func calculateTotalCount(bagOfWords BagOfWords) int {
+	total := 0
+	for _, count := range bagOfWords {
+		total += count
+	}
+	return total
+}
+
+func classifyFile(filePath string, hamBow, spamBow BagOfWords, hamTc, spamTc int) (hamProb, spamProb float64, err error) {
+	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return 0, fmt.Errorf("could not read document for probability: %w", err)
+		return 0, 0, fmt.Errorf("could not read file %s: %w", filePath, err)
 	}
 
-	tokens := tokenize(string(content))
-	logProb := 0.0
+	email := string(content)
+	tokens := tokenize(email)
+
+	logProbHam := 0.0
+	logProbSpam := 0.0
+
+	alpha := 1.0
+
+	combinedVocab := make(map[string]struct{})
+	for word := range hamBow {
+		combinedVocab[word] = struct{}{}
+	}
+	for word := range spamBow {
+		combinedVocab[word] = struct{}{}
+	}
+	vocabSize := float64(len(combinedVocab))
+	if vocabSize == 0 {
+		vocabSize = 1
+	}
 
 	for _, token := range tokens {
-		tokenCount := float64(classBagOfWords[token])
+		countInHam := float64(hamBow[token])
+		countInSpam := float64(spamBow[token])
 
-		if tokenCount == 0 || classTotalCount == 0 {
-			continue
-		}
+		probTokenGivenHam := (countInHam + alpha) / (float64(hamTc) + alpha*vocabSize)
+		probTokenGivenSpam := (countInSpam + alpha) / (float64(spamTc) + alpha*vocabSize)
 
-		wordProb := tokenCount / float64(classTotalCount)
-		logProb += math.Log(wordProb)
+		logProbHam += math.Log(probTokenGivenHam)
+		logProbSpam += math.Log(probTokenGivenSpam)
 	}
 
-	return logProb, nil
+	return logProbHam, logProbSpam, nil
 }
 
 func main() {
 	hamRoot := "./enron1/ham"
 	spamRoot := "./enron1/spam"
 
-	fmt.Println("Processing ham directory...")
+	fmt.Println("Training on ham directory...")
 	err := filepath.WalkDir(hamRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -79,19 +107,14 @@ func main() {
 		}
 		return nil
 	})
-
 	if err != nil {
 		fmt.Printf("Error walking ham directory: %v\n", err)
 		return
 	}
+	hamTotalCount = calculateTotalCount(hamBagOfWords)
+	fmt.Printf("Finished training ham. Unique words: %d, Total words: %d\n", len(hamBagOfWords), hamTotalCount)
 
-	for _, count := range hamBagOfWords {
-		hamTotalCount += count
-	}
-	fmt.Printf("Finished processing ham directory. Total unique ham words: %d, Total ham word count: %d\n",
-		len(hamBagOfWords), hamTotalCount)
-
-	fmt.Println("Processing spam directory...")
+	fmt.Println("Training on spam directory...")
 	err = filepath.WalkDir(spamRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -104,32 +127,48 @@ func main() {
 		}
 		return nil
 	})
-
 	if err != nil {
 		fmt.Printf("Error walking spam directory: %v\n", err)
 		return
 	}
+	spamTotalCount = calculateTotalCount(spamBagOfWords)
+	fmt.Printf("Finished training spam. Unique words: %d, Total words: %d\n", len(spamBagOfWords), spamTotalCount)
 
-	for _, count := range spamBagOfWords {
-		spamTotalCount += count
-	}
-	fmt.Printf("Finished processing spam directory. Total unique spam words: %d, Total spam word count: %d\n",
-		len(spamBagOfWords), spamTotalCount)
+	fmt.Println("--- Training Complete ---")
 
 	testFilePath := "./enron1/ham/0001.1999-12-10.farmer.ham.txt"
+	fmt.Printf("\nClassifying file: %s\n", testFilePath)
 
-	logProbGivenHam, err := calcLogDocProbability(testFilePath, hamBagOfWords, hamTotalCount)
+	logProbHam, logProbSpam, err := classifyFile(testFilePath, hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
 	if err != nil {
-		fmt.Printf("Error calculating log probability for ham: %v\n", err)
+		fmt.Printf("Error classifying file: %v\n", err)
 		return
 	}
 
-	logProbGivenSpam, err := calcLogDocProbability(testFilePath, spamBagOfWords, spamTotalCount)
+	fmt.Printf("Log Probability (Ham): %f\n", logProbHam)
+	fmt.Printf("Log Probability (Spam): %f\n", logProbSpam)
+
+	if logProbHam > logProbSpam {
+		fmt.Println("Prediction: HAM")
+	} else {
+		fmt.Println("Prediction: SPAM")
+	}
+
+	spamTestFilePath := "./enron1/spam/0006.2003-12-18.GP.spam.txt"
+	fmt.Printf("\nClassifying file: %s\n", spamTestFilePath)
+
+	logProbHamSpam, logProbSpamSpam, err := classifyFile(spamTestFilePath, hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
 	if err != nil {
-		fmt.Printf("Error calculating log probability for spam: %v\n", err)
+		fmt.Printf("Error classifying file: %v\n", err)
 		return
 	}
 
-	fmt.Printf("Log-probability of '%s' given HAM: %f\n", testFilePath, logProbGivenHam)
-	fmt.Printf("Log-probability of '%s' given SPAM: %f\n", testFilePath, logProbGivenSpam)
+	fmt.Printf("Log Probability (Ham): %f\n", logProbHamSpam)
+	fmt.Printf("Log Probability (Spam): %f\n", logProbSpamSpam)
+
+	if logProbHamSpam > logProbSpamSpam {
+		fmt.Println("Prediction: HAM")
+	} else {
+		fmt.Println("Prediction: SPAM")
+	}
 }
