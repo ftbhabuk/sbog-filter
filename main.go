@@ -5,81 +5,90 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
-func frequency(tokens []string) map[string]int {
-	freqs := make(map[string]int)
-	for _, token := range tokens {
-		freqs[token]++
+var hamBagOfWords = make(map[string]int)
+var hamTotalCount int
+
+var spamBagOfWords = make(map[string]int)
+var spamTotalCount int
+
+func tokenize(message string) []string {
+	fields := strings.Fields(message)
+	tokens := make([]string, len(fields))
+	for i, field := range fields {
+		tokens[i] = strings.ToUpper(field)
 	}
-	return freqs
+	return tokens
 }
 
-func probability(freqs map[string]int, total int) map[string]float64 {
-	probs := make(map[string]float64)
-	for word, count := range freqs {
-		probs[word] = float64(count) / float64(total)
-	}
-	return probs
-}
-
-func AddFileToBag(path string, bowl map[string]int) error {
+func addFileToBag(path string, bagOfWords map[string]int) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("could not read file %s: %w", path, err)
 	}
 
-	email := string(content)
-	tokens := strings.Fields(email)
+	emailContent := string(content)
+	tokens := tokenize(emailContent)
 
 	for _, token := range tokens {
-		bowl[strings.ToUpper(token)]++
+		bagOfWords[token]++
 	}
 	return nil
 }
 
 func main() {
-	bowl := make(map[string]int)
+	hamRoot := "./enron1/ham"
+	spamRoot := "./enron1/spam"
 
-	err := filepath.WalkDir("./enron1", func(path string, d fs.DirEntry, err error) error {
+	fmt.Println("Processing ham directory...")
+	err := filepath.WalkDir(hamRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			return nil
+		if !d.IsDir() {
+			fileErr := addFileToBag(path, hamBagOfWords)
+			if fileErr != nil {
+				fmt.Fprintf(os.Stderr, "Error processing ham file %s: %v\n", path, fileErr)
+			}
 		}
-		return AddFileToBag(path, bowl)
+		return nil
 	})
+
 	if err != nil {
-		panic(err)
+		fmt.Printf("Error walking ham directory: %v\n", err)
+		return
 	}
 
-	freqs := bowl
-	total := 0
-	for _, count := range freqs {
-		total += count
+	for _, count := range hamBagOfWords {
+		hamTotalCount += count
 	}
-	probs := probability(freqs, total)
+	fmt.Printf("Finished processing ham directory. Total unique ham words: %d, Total ham word count: %d\n",
+		len(hamBagOfWords), hamTotalCount)
 
-	type pair struct {
-		word  string
-		count int
-		prob  float64
-	}
-	var sorted []pair
-	for w, c := range freqs {
-		sorted = append(sorted, pair{w, c, probs[w]})
-	}
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].count > sorted[j].count
+	fmt.Println("Processing spam directory...")
+	err = filepath.WalkDir(spamRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			fileErr := addFileToBag(path, spamBagOfWords)
+			if fileErr != nil {
+				fmt.Fprintf(os.Stderr, "Error processing spam file %s: %v\n", path, fileErr)
+			}
+		}
+		return nil
 	})
 
-	fmt.Printf("Total words: %d\n\n", total)
-	fmt.Printf("%-15s %6s %10s\n", "Word", "Count", "Probability")
-	fmt.Println("--------------------------------------")
-	for _, p := range sorted[:20] {
-		fmt.Printf("%-15s %6d %10.6f\n", p.word, p.count, p.prob)
+	if err != nil {
+		fmt.Printf("Error walking spam directory: %v\n", err)
+		return
 	}
+
+	for _, count := range spamBagOfWords {
+		spamTotalCount += count
+	}
+	fmt.Printf("Finished processing spam directory. Total unique spam words: %d, Total spam word count: %d\n",
+		len(spamBagOfWords), spamTotalCount)
 }
