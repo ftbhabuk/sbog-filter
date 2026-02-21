@@ -90,6 +90,33 @@ func classifyFile(filePath string, hamBow, spamBow BagOfWords, hamTc, spamTc int
 	return logProbHam, logProbSpam, nil
 }
 
+func classifyDirectory(dirPath string, hamBow, spamBow BagOfWords, hamTc, spamTc int) (spamCount, hamCount int, err error) {
+	spamOutcomeCount := 0
+	hamOutcomeCount := 0
+
+	err = filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			logProbHam, logProbSpam, classifyErr := classifyFile(path, hamBow, spamBow, hamTc, spamTc)
+			if classifyErr != nil {
+				fmt.Fprintf(os.Stderr, "Error classifying file %s: %v\n", path, classifyErr)
+				return nil
+			}
+
+			if logProbSpam > logProbHam {
+				spamOutcomeCount++
+			} else {
+				hamOutcomeCount++
+			}
+		}
+		return nil
+	})
+
+	return spamOutcomeCount, hamOutcomeCount, err
+}
+
 func main() {
 	hamRoot := "./enron1/ham"
 	spamRoot := "./enron1/spam"
@@ -136,39 +163,19 @@ func main() {
 
 	fmt.Println("--- Training Complete ---")
 
-	testFilePath := "./enron1/ham/0001.1999-12-10.farmer.ham.txt"
-	fmt.Printf("\nClassifying file: %s\n", testFilePath)
-
-	logProbHam, logProbSpam, err := classifyFile(testFilePath, hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
+	fmt.Printf("\nClassifying HAM folder: %s\n", hamRoot)
+	hamPredictedSpam, hamPredictedHam, err := classifyDirectory(hamRoot, hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
 	if err != nil {
-		fmt.Printf("Error classifying file: %v\n", err)
+		fmt.Printf("Error classifying ham directory: %v\n", err)
 		return
 	}
+	fmt.Printf("  Actual HAM files: Predicted SPAM: %d, Predicted HAM: %d\n", hamPredictedSpam, hamPredictedHam)
 
-	fmt.Printf("Log Probability (Ham): %f\n", logProbHam)
-	fmt.Printf("Log Probability (Spam): %f\n", logProbSpam)
-
-	if logProbHam > logProbSpam {
-		fmt.Println("Prediction: HAM")
-	} else {
-		fmt.Println("Prediction: SPAM")
-	}
-
-	spamTestFilePath := "./enron1/spam/0006.2003-12-18.GP.spam.txt"
-	fmt.Printf("\nClassifying file: %s\n", spamTestFilePath)
-
-	logProbHamSpam, logProbSpamSpam, err := classifyFile(spamTestFilePath, hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
+	fmt.Printf("\nClassifying SPAM folder: %s\n", spamRoot)
+	spamPredictedSpam, spamPredictedHam, err := classifyDirectory(spamRoot, hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
 	if err != nil {
-		fmt.Printf("Error classifying file: %v\n", err)
+		fmt.Printf("Error classifying spam directory: %v\n", err)
 		return
 	}
-
-	fmt.Printf("Log Probability (Ham): %f\n", logProbHamSpam)
-	fmt.Printf("Log Probability (Spam): %f\n", logProbSpamSpam)
-
-	if logProbHamSpam > logProbSpamSpam {
-		fmt.Println("Prediction: HAM")
-	} else {
-		fmt.Println("Prediction: SPAM")
-	}
+	fmt.Printf("  Actual SPAM files: Predicted SPAM: %d, Predicted HAM: %d\n", spamPredictedSpam, spamPredictedHam)
 }
