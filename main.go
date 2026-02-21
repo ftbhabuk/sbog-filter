@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,29 @@ func addFileToBag(path string, bagOfWords map[string]int) error {
 		bagOfWords[token]++
 	}
 	return nil
+}
+
+func calcLogDocProbability(docPath string, classBagOfWords map[string]int, classTotalCount int) (float64, error) {
+	content, err := os.ReadFile(docPath)
+	if err != nil {
+		return 0, fmt.Errorf("could not read document for probability: %w", err)
+	}
+
+	tokens := tokenize(string(content))
+	logProb := 0.0
+
+	for _, token := range tokens {
+		tokenCount := float64(classBagOfWords[token])
+
+		if tokenCount == 0 || classTotalCount == 0 {
+			continue
+		}
+
+		wordProb := tokenCount / float64(classTotalCount)
+		logProb += math.Log(wordProb)
+	}
+
+	return logProb, nil
 }
 
 func main() {
@@ -91,4 +115,21 @@ func main() {
 	}
 	fmt.Printf("Finished processing spam directory. Total unique spam words: %d, Total spam word count: %d\n",
 		len(spamBagOfWords), spamTotalCount)
+
+	testFilePath := "./enron1/ham/0001.1999-12-10.farmer.ham.txt"
+
+	logProbGivenHam, err := calcLogDocProbability(testFilePath, hamBagOfWords, hamTotalCount)
+	if err != nil {
+		fmt.Printf("Error calculating log probability for ham: %v\n", err)
+		return
+	}
+
+	logProbGivenSpam, err := calcLogDocProbability(testFilePath, spamBagOfWords, spamTotalCount)
+	if err != nil {
+		fmt.Printf("Error calculating log probability for spam: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Log-probability of '%s' given HAM: %f\n", testFilePath, logProbGivenHam)
+	fmt.Printf("Log-probability of '%s' given SPAM: %f\n", testFilePath, logProbGivenSpam)
 }
