@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
 	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -48,6 +50,98 @@ func calculateTotalCount(bagOfWords BagOfWords) int {
 		total += count
 	}
 	return total
+}
+
+func saveModelToCSV(hamPath, spamPath string, hamBow, spamBow BagOfWords, hamTc, spamTc int) error {
+	hamFile, err := os.Create(hamPath)
+	if err != nil {
+		return err
+	}
+	defer hamFile.Close()
+
+	spamFile, err := os.Create(spamPath)
+	if err != nil {
+		return err
+	}
+	defer spamFile.Close()
+
+	hamWriter := csv.NewWriter(hamFile)
+	spamWriter := csv.NewWriter(spamFile)
+
+	hamWriter.Write([]string{"word", "count"})
+	for word, count := range hamBow {
+		hamWriter.Write([]string{word, strconv.Itoa(count)})
+	}
+	hamWriter.Flush()
+
+	spamWriter.Write([]string{"word", "count"})
+	for word, count := range spamBow {
+		spamWriter.Write([]string{word, strconv.Itoa(count)})
+	}
+	spamWriter.Flush()
+
+	hamMeta, _ := os.Create("ham_meta.txt")
+	hamMeta.WriteString(strconv.Itoa(hamTc))
+	hamMeta.Close()
+
+	spamMeta, _ := os.Create("spam_meta.txt")
+	spamMeta.WriteString(strconv.Itoa(spamTc))
+	spamMeta.Close()
+
+	return nil
+}
+
+func loadModelFromCSV(hamPath, spamPath string) (BagOfWords, BagOfWords, int, int, error) {
+	hamBow := make(BagOfWords)
+	spamBow := make(BagOfWords)
+
+	hamFile, err := os.Open(hamPath)
+	if err != nil {
+		return hamBow, spamBow, 0, 0, err
+	}
+	defer hamFile.Close()
+
+	hamReader := csv.NewReader(hamFile)
+	records, _ := hamReader.ReadAll()
+	for i, row := range records {
+		if i == 0 {
+			continue
+		}
+		if len(row) >= 2 {
+			count, _ := strconv.Atoi(row[1])
+			hamBow[row[0]] = count
+		}
+	}
+
+	spamFile, err := os.Open(spamPath)
+	if err != nil {
+		return hamBow, spamBow, 0, 0, err
+	}
+	defer spamFile.Close()
+
+	spamReader := csv.NewReader(spamFile)
+	records, _ = spamReader.ReadAll()
+	for i, row := range records {
+		if i == 0 {
+			continue
+		}
+		if len(row) >= 2 {
+			count, _ := strconv.Atoi(row[1])
+			spamBow[row[0]] = count
+		}
+	}
+
+	hamTc := 0
+	spamTc := 0
+
+	if data, err := os.ReadFile("ham_meta.txt"); err == nil {
+		hamTc, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+	if data, err := os.ReadFile("spam_meta.txt"); err == nil {
+		spamTc, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+
+	return hamBow, spamBow, hamTc, spamTc, nil
 }
 
 func classifyFile(filePath string, hamBow, spamBow BagOfWords, hamTc, spamTc int) (hamProb, spamProb float64, err error) {
@@ -118,61 +212,73 @@ func classifyDirectory(dirPath string, hamBow, spamBow BagOfWords, hamTc, spamTc
 }
 
 func main() {
-	trainingFolders := []string{
-		"./data/enron1",
-		"./data/enron2",
-		"./data/enron3",
-		"./data/enron4",
-		"./data/enron5",
-	}
-
-	fmt.Println("--- Starting Training ---")
-	for _, folder := range trainingFolders {
-		hamPath := filepath.Join(folder, "ham")
-		spamPath := filepath.Join(folder, "spam")
-
-		fmt.Printf("Processing ham in %s...\n", folder)
-		err := filepath.WalkDir(hamPath, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if !d.IsDir() {
-				fileErr := addFileToBag(path, hamBagOfWords)
-				if fileErr != nil {
-					fmt.Fprintf(os.Stderr, "Error processing ham file %s: %v\n", path, fileErr)
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			fmt.Printf("Error walking ham directory %s: %v\n", hamPath, err)
-			return
+	hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount, err := loadModelFromCSV("data/ham.csv", "data/spam.csv")
+	if err == nil {
+		fmt.Println("--- Loaded cached model from CSV ---")
+		fmt.Printf("Loaded: %d unique ham words, %d unique spam words\n", len(hamBagOfWords), len(spamBagOfWords))
+		fmt.Printf("Ham total: %d, Spam total: %d\n", hamTotalCount, spamTotalCount)
+	} else {
+		trainingFolders := []string{
+			"./data/enron1",
+			"./data/enron2",
+			"./data/enron3",
+			"./data/enron4",
+			"./data/enron5",
 		}
 
-		fmt.Printf("Processing spam in %s...\n", folder)
-		err = filepath.WalkDir(spamPath, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if !d.IsDir() {
-				fileErr := addFileToBag(path, spamBagOfWords)
-				if fileErr != nil {
-					fmt.Fprintf(os.Stderr, "Error processing spam file %s: %v\n", path, fileErr)
+		fmt.Println("--- Starting Training ---")
+		for _, folder := range trainingFolders {
+			hamPath := filepath.Join(folder, "ham")
+			spamPath := filepath.Join(folder, "spam")
+
+			fmt.Printf("Processing ham in %s...\n", folder)
+			err := filepath.WalkDir(hamPath, func(path string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
 				}
+				if !d.IsDir() {
+					fileErr := addFileToBag(path, hamBagOfWords)
+					if fileErr != nil {
+						fmt.Fprintf(os.Stderr, "Error processing ham file %s: %v\n", path, fileErr)
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				fmt.Printf("Error walking ham directory %s: %v\n", hamPath, err)
+				return
 			}
-			return nil
-		})
-		if err != nil {
-			fmt.Printf("Error walking spam directory %s: %v\n", spamPath, err)
-			return
+
+			fmt.Printf("Processing spam in %s...\n", folder)
+			err = filepath.WalkDir(spamPath, func(path string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if !d.IsDir() {
+					fileErr := addFileToBag(path, spamBagOfWords)
+					if fileErr != nil {
+						fmt.Fprintf(os.Stderr, "Error processing spam file %s: %v\n", path, fileErr)
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				fmt.Printf("Error walking spam directory %s: %v\n", spamPath, err)
+				return
+			}
+		}
+
+		hamTotalCount = calculateTotalCount(hamBagOfWords)
+		spamTotalCount = calculateTotalCount(spamBagOfWords)
+		fmt.Printf("Finished training. Total unique ham words: %d, Total ham words: %d\n", len(hamBagOfWords), hamTotalCount)
+		fmt.Printf("Finished training. Total unique spam words: %d, Total spam words: %d\n", len(spamBagOfWords), spamTotalCount)
+		fmt.Println("--- Training Complete ---")
+
+		err = saveModelToCSV("data/ham.csv", "data/spam.csv", hamBagOfWords, spamBagOfWords, hamTotalCount, spamTotalCount)
+		if err == nil {
+			fmt.Println("Model saved to data/ham.csv and data/spam.csv")
 		}
 	}
-
-	hamTotalCount = calculateTotalCount(hamBagOfWords)
-	spamTotalCount = calculateTotalCount(spamBagOfWords)
-	fmt.Printf("Finished training. Total unique ham words: %d, Total ham words: %d\n", len(hamBagOfWords), hamTotalCount)
-	fmt.Printf("Finished training. Total unique spam words: %d, Total spam words: %d\n", len(spamBagOfWords), spamTotalCount)
-	fmt.Println("--- Training Complete ---")
 
 	// Test on enron6
 	validationHamDir := "./data/enron6/ham"
